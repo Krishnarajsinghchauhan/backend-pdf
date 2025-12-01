@@ -6,6 +6,7 @@ import (
 	"backend/internal/queue"
 	"backend/internal/redis"
 	"backend/internal/jobs"
+	"encoding/json"
 )
 
 type CreateJobRequest struct {
