@@ -1,47 +1,42 @@
-package s3
+package s3uploader
 
 import (
     "bytes"
-    "io"
+    "context"
     "mime"
+    "os"
     "path/filepath"
 
-    "github.com/aws/aws-sdk-go/aws"
-    "github.com/aws/aws-sdk-go/aws/session"
-    "github.com/aws/aws-sdk-go/service/s3"
+    "github.com/aws/aws-sdk-go-v2/aws"
+    "github.com/aws/aws-sdk-go-v2/config"
+    "github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-var bucket = "pdf-master-storage" // ← your bucket name
+func UploadPublicFile(buffer []byte, key string) (string, error) {
+    bucket := os.Getenv("AWS_S3_BUCKET")
 
-// UploadFile uploads a file to S3 and returns the public URL
-func UploadFile(file io.Reader, key string) (string, error) {
-    sess, err := session.NewSession(&aws.Config{
-        Region: aws.String("us-east-1"),
-    })
+    cfg, err := config.LoadDefaultConfig(context.TODO(),
+        config.WithRegion("us-east-1"),
+    )
     if err != nil {
         return "", err
     }
 
-    svc := s3.New(sess)
+    client := s3.NewFromConfig(cfg)
 
-    buf := new(bytes.Buffer)
-    if _, err := io.Copy(buf, file); err != nil {
-        return "", err
-    }
-
-    // Detect content type from file extension
     contentType := mime.TypeByExtension(filepath.Ext(key))
     if contentType == "" {
         contentType = "application/octet-stream"
     }
 
-    _, err = svc.PutObject(&s3.PutObjectInput{
+    _, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
         Bucket:      aws.String(bucket),
         Key:         aws.String(key),
-        Body:        bytes.NewReader(buf.Bytes()),
+        Body:        bytes.NewReader(buffer),
         ContentType: aws.String(contentType),
-        ACL:         aws.String("public-read"), // public preview
+        ACL:         aws.String("public-read"),
     })
+
     if err != nil {
         return "", err
     }

@@ -12,6 +12,9 @@ import (
     "github.com/gofiber/fiber/v2"
 )
 
+import s3uploader "backend/internal/s3"
+
+
 type PreviewRequest struct {
     PDFUrl  string                 `json:"pdfUrl"`
     Options map[string]interface{} `json:"options"`
@@ -56,23 +59,23 @@ func WatermarkPreview(c *fiber.Ctx) error {
     }
 
     // 4. Upload preview to S3
-    file, err := os.Open(outputPNG)
-    if err != nil {
-        return fiber.NewError(fiber.StatusInternalServerError, "Open PNG failed")
-    }
-    defer file.Close()
+    // 4. Upload preview to S3 (AWS SDK v2)
+pngBytes, err := os.ReadFile(outputPNG)
+if err != nil {
+    return fiber.NewError(fiber.StatusInternalServerError, "Read PNG failed")
+}
 
-    key := fmt.Sprintf("previews/%d.png", time.Now().UnixNano())
+key := fmt.Sprintf("previews/%d.png", time.Now().UnixNano())
 
-    // Upload using your existing S3 helper
-    url, err := s3.UploadFile(file, key)
-    if err != nil {
-        return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
-    }
+url, err := s3uploader.UploadPublicFile(pngBytes, key)
+if err != nil {
+    return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
+}
 
-    return c.JSON(fiber.Map{
-        "preview_url": url,
-    })
+return c.JSON(fiber.Map{
+    "preview_url": url,
+})
+
 }
 
 // ------------------------------
