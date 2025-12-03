@@ -2,14 +2,15 @@ package handlers
 
 import (
 	"fmt"
-
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// Request structure
 type PreviewRequest struct {
 	PDFUrl  string                 `json:"pdfUrl"`
 	Options map[string]interface{} `json:"options"`
@@ -17,71 +18,89 @@ type PreviewRequest struct {
 
 func WatermarkPreview(c *fiber.Ctx) error {
 	var req PreviewRequest
-
 	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid payload")
 	}
 
 	if req.PDFUrl == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Missing pdfUrl")
 	}
 
-	// Temp file paths
-	inputPath := fmt.Sprintf("/tmp/input_%d.pdf", time.Now().UnixNano())
-	outputPath := fmt.Sprintf("/tmp/preview_%d.png", time.Now().UnixNano())
+	// create temp files
+	inputPDF := fmt.Sprintf("/tmp/preview_%d.pdf", time.Now().UnixNano())
+	outputPNG := fmt.Sprintf("/tmp/preview_out_%d.png", time.Now().UnixNano())
 
-	// 1) Download PDF to server
-	err := downloadFile(req.PDFUrl, inputPath)
+	// 🟦 download pdf
+	err := download(req.PDFUrl, inputPDF)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "PDF download failed")
+		return fiber.NewError(fiber.StatusInternalServerError, "Download PDF failed")
 	}
 
-	// 2) Apply watermark on FIRST PAGE ONLY
-	text := req.Options["text"].(string)
-	color := req.Options["color"].(string)
-	opacity := req.Options["opacity"].(string)
-	angle := req.Options["angle"].(string)
-	fontSize := req.Options["fontSize"].(string)
+	// 🟦 extract options
+	text := safeString(req.Options["text"], "WATERMARK")
+	color := safeString(req.Options["color"], "#000000")
+	opacity := safeString(req.Options["opacity"], "0.25")
+	angle := safeString(req.Options["angle"], "0")
+	fontSize := safeString(req.Options["fontSize"], "60")
 
+	// 🟦 generate preview (only page 1)
 	cmd := exec.Command("bash", "-c",
 		fmt.Sprintf(
-			`magick convert -density 150 "%s[0]" \
-        -fill "%s" -gravity center -pointsize %s \
-        -annotate %s "%s" \
-        -alpha set -channel A -evaluate multiply %s \
-        "%s"`,
-			inputPath, color, fontSize, angle, text, opacity, outputPath,
+			`magick "%s[0]" -fill "%s" -gravity center -pointsize %s `+
+				`-annotate %s "%s" -alpha set -channel A -evaluate multiply %s "%s"`,
+			inputPDF, color, fontSize, angle, text, opacity, outputPNG,
 		),
 	)
 
-	err = cmd.Run()
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Watermark preview failed")
+	if err := cmd.Run(); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Preview generation failed")
 	}
 
-	// 3) Upload preview to S3
-	previewURL, err := uploadToS3(outputPath)
+	// 🟦 upload to S3
+	url, err := uploadPreviewToS3(outputPNG)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Preview upload failed")
+		return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
 	}
 
-	return c.JSON(fiber.Map{
-		"preview_url": previewURL,
-	})
+	return c.JSON(fiber.Map{"preview_url": url})
 }
 
 // ------------------------------
-// Download Helper
+// Helpers
 // ------------------------------
-func downloadFile(url, dest string) error {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf(`curl -s -o "%s" "%s"`, dest, url))
-	return cmd.Run()
+
+func download(url, output string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	f, err := os.Create(output)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(f, resp.Body)
+	return err
 }
 
-// ------------------------------
-// Upload Helper (same as your worker)
-// ------------------------------
-func uploadToS3(path string) (string, error) {
-	// Implement the same upload code you already use in workers
-	return "", nil // ← You already have working upload code; reuse it.
+func safeString(val interface{}, def string) string {
+	if v, ok := val.(string); ok {
+		return v
+	}
+	return def
+}
+
+// TODO: replace this with real S3 uploader
+func uploadPreviewToS3(path string) (string, error) {
+	// temp: serve directly for now
+	id := time.Now().UnixNano()
+	public := fmt.Sprintf("https://pixelpdf.in/previews/%d.png", id)
+
+	// you must copy file to public CDN or S3 bucket
+	// cp path → /var/www/previews/... OR use your AWS uploader
+
+	return public, nil
 }
