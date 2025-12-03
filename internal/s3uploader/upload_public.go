@@ -3,6 +3,7 @@ package s3uploader
 import (
     "bytes"
     "context"
+    "fmt"
     "mime"
     "os"
     "path/filepath"
@@ -10,7 +11,6 @@ import (
     "github.com/aws/aws-sdk-go-v2/aws"
     "github.com/aws/aws-sdk-go-v2/config"
     "github.com/aws/aws-sdk-go-v2/service/s3"
-    "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 func UploadPublicFile(buffer []byte, key string) (string, error) {
@@ -30,19 +30,19 @@ func UploadPublicFile(buffer []byte, key string) (string, error) {
         contentType = "image/png"
     }
 
+    // 🚫 NO ACL — bucket owner enforced blocks ACL usage
     _, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
         Bucket:      aws.String(bucket),
         Key:         aws.String(key),
         Body:        bytes.NewReader(buffer),
         ContentType: aws.String(contentType),
-
-       
     })
 
     if err != nil {
-			fmt.Println("S3 PUT ERROR:", err)
+        fmt.Println("S3 PUT ERROR:", err)
         return "", err
     }
 
+    // Public URL (your bucket policy must allow public read on previews/*)
     return "https://" + bucket + ".s3.amazonaws.com/" + key, nil
 }
