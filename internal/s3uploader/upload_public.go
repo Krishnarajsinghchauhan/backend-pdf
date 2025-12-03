@@ -10,6 +10,7 @@ import (
     "github.com/aws/aws-sdk-go-v2/aws"
     "github.com/aws/aws-sdk-go-v2/config"
     "github.com/aws/aws-sdk-go-v2/service/s3"
+    "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 func UploadPublicFile(buffer []byte, key string) (string, error) {
@@ -34,7 +35,9 @@ func UploadPublicFile(buffer []byte, key string) (string, error) {
         Key:         aws.String(key),
         Body:        bytes.NewReader(buffer),
         ContentType: aws.String(contentType),
-        ACL:         aws.String("public-read"),
+
+        // 🟢 Correct ACL enum (AWS SDK v2)
+        ACL: types.ObjectCannedACLPublicRead,
     })
 
     if err != nil {
