@@ -1,6 +1,7 @@
 package handlers
 
 import (
+    "backend/internal/s3"
     "fmt"
     "io"
     "net/http"
@@ -27,23 +28,23 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusBadRequest, "Missing pdfUrl")
     }
 
-    // Temp files
+    // temp files
     inputPDF := fmt.Sprintf("/tmp/preview_%d.pdf", time.Now().UnixNano())
     outputPNG := fmt.Sprintf("/tmp/preview_out_%d.png", time.Now().UnixNano())
 
-    // 1. Download PDF
+    // 1. download PDF
     if err := download(req.PDFUrl, inputPDF); err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Download PDF failed")
     }
 
-    // 2. Extract safe options
+    // 2. extract options
     text := safeString(req.Options["text"], "WATERMARK")
     color := safeString(req.Options["color"], "#000000")
     opacity := safeString(req.Options["opacity"], "0.25")
     angle := safeString(req.Options["angle"], "0")
     fontSize := safeString(req.Options["fontSize"], "60")
 
-    // 3. Generate preview using ImageMagick 6 (`convert`)
+    // 3. generate watermark preview (page 1)
     cmdStr := fmt.Sprintf(
         `convert "%s[0]" -fill "%s" -gravity center -pointsize %s -annotate %s "%s" -alpha set -channel A -evaluate multiply %s "%s"`,
         inputPDF, color, fontSize, angle, text, opacity, outputPNG,
@@ -54,19 +55,30 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusInternalServerError, "Preview generation failed")
     }
 
-    // TODO: Upload to S3 (currently static preview)
-    previewURL := fmt.Sprintf("https://pixelpdf.in/previews/%d.png", time.Now().UnixNano())
+    // 4. Upload preview to S3
+    file, err := os.Open(outputPNG)
+    if err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, "Open PNG failed")
+    }
+    defer file.Close()
 
-    return c.JSON(fiber.Map{"preview_url": previewURL})
+    key := fmt.Sprintf("previews/%d.png", time.Now().UnixNano())
+
+    // Upload using your existing S3 helper
+    url, err := s3.UploadFile(file, key)
+    if err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
+    }
+
+    return c.JSON(fiber.Map{
+        "preview_url": url,
+    })
 }
 
-//
-// ────────────────────────────────
-//   HELPER FUNCTIONS (REQUIRED)
-// ────────────────────────────────
-//
+// ------------------------------
+// Helpers
+// ------------------------------
 
-// download PDF to local temp file
 func download(url, output string) error {
     resp, err := http.Get(url)
     if err != nil {
@@ -84,7 +96,6 @@ func download(url, output string) error {
     return err
 }
 
-// safely convert `interface{}` to string
 func safeString(v interface{}, def string) string {
     if s, ok := v.(string); ok {
         return s
