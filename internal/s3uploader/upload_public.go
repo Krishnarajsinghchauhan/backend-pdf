@@ -36,8 +36,7 @@ func UploadPublicFile(buffer []byte, key string) (string, error) {
         Body:        bytes.NewReader(buffer),
         ContentType: aws.String(contentType),
 
-        // 🟢 Correct ACL enum (AWS SDK v2)
-        ACL: types.ObjectCannedACLPublicRead,
+       
     })
 
     if err != nil {
