@@ -26,7 +26,7 @@ func UploadPublicFile(buffer []byte, key string) (string, error) {
 
     contentType := mime.TypeByExtension(filepath.Ext(key))
     if contentType == "" {
-        contentType = "application/octet-stream"
+        contentType = "image/png"
     }
 
     _, err = client.PutObject(context.TODO(), &s3.PutObjectInput{

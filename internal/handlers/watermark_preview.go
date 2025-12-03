@@ -1,7 +1,7 @@
 package handlers
 
 import (
-    "backend/internal/s3"
+    s3uploader "backend/internal/s3"
     "fmt"
     "io"
     "net/http"
@@ -11,9 +11,6 @@ import (
 
     "github.com/gofiber/fiber/v2"
 )
-
-import s3uploader "backend/internal/s3"
-
 
 type PreviewRequest struct {
     PDFUrl  string                 `json:"pdfUrl"`
@@ -31,23 +28,20 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusBadRequest, "Missing pdfUrl")
     }
 
-    // temp files
     inputPDF := fmt.Sprintf("/tmp/preview_%d.pdf", time.Now().UnixNano())
     outputPNG := fmt.Sprintf("/tmp/preview_out_%d.png", time.Now().UnixNano())
 
-    // 1. download PDF
+    // download PDF
     if err := download(req.PDFUrl, inputPDF); err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Download PDF failed")
     }
 
-    // 2. extract options
     text := safeString(req.Options["text"], "WATERMARK")
     color := safeString(req.Options["color"], "#000000")
     opacity := safeString(req.Options["opacity"], "0.25")
     angle := safeString(req.Options["angle"], "0")
     fontSize := safeString(req.Options["fontSize"], "60")
 
-    // 3. generate watermark preview (page 1)
     cmdStr := fmt.Sprintf(
         `convert "%s[0]" -fill "%s" -gravity center -pointsize %s -annotate %s "%s" -alpha set -channel A -evaluate multiply %s "%s"`,
         inputPDF, color, fontSize, angle, text, opacity, outputPNG,
@@ -58,29 +52,25 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusInternalServerError, "Preview generation failed")
     }
 
-    // 4. Upload preview to S3
-    // 4. Upload preview to S3 (AWS SDK v2)
-pngBytes, err := os.ReadFile(outputPNG)
-if err != nil {
-    return fiber.NewError(fiber.StatusInternalServerError, "Read PNG failed")
+    // read PNG
+    pngBytes, err := os.ReadFile(outputPNG)
+    if err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, "Read PNG failed")
+    }
+
+    // upload
+    key := fmt.Sprintf("previews/%d.png", time.Now().UnixNano())
+    url, err := s3uploader.UploadPublicFile(pngBytes, key)
+    if err != nil {
+        return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
+    }
+
+    return c.JSON(fiber.Map{
+        "preview_url": url,
+    })
 }
 
-key := fmt.Sprintf("previews/%d.png", time.Now().UnixNano())
-
-url, err := s3uploader.UploadPublicFile(pngBytes, key)
-if err != nil {
-    return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
-}
-
-return c.JSON(fiber.Map{
-    "preview_url": url,
-})
-
-}
-
-// ------------------------------
-// Helpers
-// ------------------------------
+// helpers
 
 func download(url, output string) error {
     resp, err := http.Get(url)
