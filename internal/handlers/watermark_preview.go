@@ -1,13 +1,14 @@
 package handlers
 
 import (
-    s3uploader "backend/internal/s3"
     "fmt"
     "io"
     "net/http"
     "os"
     "os/exec"
     "time"
+
+    s3uploader "backend/internal/s3uploader"
 
     "github.com/gofiber/fiber/v2"
 )
@@ -58,10 +59,11 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusInternalServerError, "Read PNG failed")
     }
 
-    // upload
+    // upload using correct uploader
     key := fmt.Sprintf("previews/%d.png", time.Now().UnixNano())
     url, err := s3uploader.UploadPublicFile(pngBytes, key)
     if err != nil {
+        fmt.Println("S3 Upload Error:", err) // <-- debug
         return fiber.NewError(fiber.StatusInternalServerError, "Upload preview failed")
     }
 
@@ -70,7 +72,9 @@ func WatermarkPreview(c *fiber.Ctx) error {
     })
 }
 
-// helpers
+// ------------------------------
+// Helpers
+// ------------------------------
 
 func download(url, output string) error {
     resp, err := http.Get(url)
