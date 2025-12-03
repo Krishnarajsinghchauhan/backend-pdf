@@ -17,6 +17,7 @@ type PreviewRequest struct {
 }
 
 func WatermarkPreview(c *fiber.Ctx) error {
+
     var req PreviewRequest
     if err := c.BodyParser(&req); err != nil {
         return fiber.NewError(fiber.StatusBadRequest, "Invalid payload")
@@ -26,21 +27,23 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusBadRequest, "Missing pdfUrl")
     }
 
+    // Temp files
     inputPDF := fmt.Sprintf("/tmp/preview_%d.pdf", time.Now().UnixNano())
     outputPNG := fmt.Sprintf("/tmp/preview_out_%d.png", time.Now().UnixNano())
 
-    // download PDF
+    // 1. Download PDF
     if err := download(req.PDFUrl, inputPDF); err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Download PDF failed")
     }
 
+    // 2. Extract safe options
     text := safeString(req.Options["text"], "WATERMARK")
     color := safeString(req.Options["color"], "#000000")
     opacity := safeString(req.Options["opacity"], "0.25")
     angle := safeString(req.Options["angle"], "0")
     fontSize := safeString(req.Options["fontSize"], "60")
 
-    // REAL command (ImageMagick 6)
+    // 3. Generate preview using ImageMagick 6 (`convert`)
     cmdStr := fmt.Sprintf(
         `convert "%s[0]" -fill "%s" -gravity center -pointsize %s -annotate %s "%s" -alpha set -channel A -evaluate multiply %s "%s"`,
         inputPDF, color, fontSize, angle, text, opacity, outputPNG,
@@ -51,8 +54,40 @@ func WatermarkPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusInternalServerError, "Preview generation failed")
     }
 
-    // TODO: upload to S3
-    url := "https://pixelpdf.in/previews/" + fmt.Sprintf("%d.png", time.Now().UnixNano())
+    // TODO: Upload to S3 (currently static preview)
+    previewURL := fmt.Sprintf("https://pixelpdf.in/previews/%d.png", time.Now().UnixNano())
 
-    return c.JSON(fiber.Map{"preview_url": url})
+    return c.JSON(fiber.Map{"preview_url": previewURL})
+}
+
+//
+// ────────────────────────────────
+//   HELPER FUNCTIONS (REQUIRED)
+// ────────────────────────────────
+//
+
+// download PDF to local temp file
+func download(url, output string) error {
+    resp, err := http.Get(url)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    out, err := os.Create(output)
+    if err != nil {
+        return err
+    }
+    defer out.Close()
+
+    _, err = io.Copy(out, resp.Body)
+    return err
+}
+
+// safely convert `interface{}` to string
+func safeString(v interface{}, def string) string {
+    if s, ok := v.(string); ok {
+        return s
+    }
+    return def
 }
