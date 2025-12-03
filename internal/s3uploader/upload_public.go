@@ -41,6 +41,7 @@ func UploadPublicFile(buffer []byte, key string) (string, error) {
     })
 
     if err != nil {
+			fmt.Println("S3 PUT ERROR:", err)
         return "", err
     }
 
