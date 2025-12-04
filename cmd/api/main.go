@@ -43,6 +43,8 @@ func main() {
 	app.Get("/job/result/:id", handlers.GetJobResult)
 
 	app.Post("/watermark/preview", handlers.WatermarkPreview)
+	app.Post("/header-footer/preview", handlers.HeaderFooterPreview)
+
 
 	log.Println("API Gateway running on port", os.Getenv("PORT"))
 	app.Listen(":" + os.Getenv("PORT"))
