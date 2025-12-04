@@ -3,8 +3,6 @@ package handlers
 import (
     "backend/internal/s3uploader"
     "fmt"
-    "io"
-    "net/http"
     "os"
     "os/exec"
     "time"
@@ -13,7 +11,7 @@ import (
 )
 
 type HeaderFooterPreviewReq struct {
-    PDFUrl string                 `json:"pdfUrl"`
+    PDFUrl  string                 `json:"pdfUrl"`
     Options map[string]interface{} `json:"options"`
 }
 
@@ -27,16 +25,17 @@ func HeaderFooterPreview(c *fiber.Ctx) error {
         return fiber.NewError(fiber.StatusBadRequest, "Missing pdfUrl")
     }
 
+    // Temp files
     inputPDF := fmt.Sprintf("/tmp/hf_preview_%d.pdf", time.Now().UnixNano())
     outputPNG := fmt.Sprintf("/tmp/hf_preview_out_%d.png", time.Now().UnixNano())
     layerPNG := fmt.Sprintf("/tmp/hf_layer_%d.png", time.Now().UnixNano())
 
-    // Download PDF
+    // 🔹 Download source PDF
     if err := download(req.PDFUrl, inputPDF); err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Download PDF failed")
     }
 
-    // Extract options
+    // Extract fields
     header := safeString(req.Options["header"], "")
     footer := safeString(req.Options["footer"], "")
     fontSize := safeString(req.Options["fontSize"], "40")
@@ -45,30 +44,49 @@ func HeaderFooterPreview(c *fiber.Ctx) error {
     marginTop := safeString(req.Options["marginTop"], "80")
     marginBottom := safeString(req.Options["marginBottom"], "80")
 
-    // Create header/footer overlay (PNG)
+    // Map alignment to ImageMagick gravity
+    gravity := map[string]string{
+        "left":      "west",
+        "right":     "east",
+        "center":    "center",
+        "top":       "north",
+        "bottom":    "south",
+        "topleft":   "northwest",
+        "topright":  "northeast",
+        "bottomleft": "southwest",
+        "bottomright": "southeast",
+    }[align]
+
+    if gravity == "" {
+        gravity = "center"
+    }
+
+    // 🔹 Build header/footer overlay PNG
     cmdLayer := exec.Command("bash", "-c",
         fmt.Sprintf(`
 convert -size 2480x3508 xc:none \
   -gravity north -pointsize %s -fill "%s" -annotate +0+%s "%s" \
   -gravity south -pointsize %s -fill "%s" -annotate +0+%s "%s" \
   "%s"
-`, fontSize, color, marginTop, header, fontSize, color, marginBottom, footer, layerPNG))
+`, fontSize, color, marginTop, header,
+           fontSize, color, marginBottom, footer,
+           layerPNG))
 
     if err := cmdLayer.Run(); err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Layer creation failed")
     }
 
-    // Build preview on page 1
+    // 🔹 Build preview using only page 1
     cmdPrev := exec.Command("bash", "-c",
         fmt.Sprintf(`
-convert "%s[0]" "%s" -gravity center -compose over -composite "%s"
-`, inputPDF, layerPNG, outputPNG))
+convert "%s[0]" "%s" -gravity %s -compose over -composite "%s"
+`, inputPDF, layerPNG, gravity, outputPNG))
 
     if err := cmdPrev.Run(); err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Preview generation failed")
     }
 
-    // Upload preview PNG
+    // 🔹 Upload preview to S3
     pngBytes, err := os.ReadFile(outputPNG)
     if err != nil {
         return fiber.NewError(fiber.StatusInternalServerError, "Read PNG failed")
@@ -83,28 +101,4 @@ convert "%s[0]" "%s" -gravity center -compose over -composite "%s"
     return c.JSON(fiber.Map{
         "preview_url": url,
     })
-}
-
-func safeString(v interface{}, def string) string {
-    if s, ok := v.(string); ok {
-        return s
-    }
-    return def
-}
-
-func download(url, output string) error {
-    resp, err := http.Get(url)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-
-    f, err := os.Create(output)
-    if err != nil {
-        return err
-    }
-    defer f.Close()
-
-    _, err = io.Copy(f, resp.Body)
-    return err
 }
