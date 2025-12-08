@@ -6,7 +6,7 @@ func QueueForTool(tool string) string {
 	switch tool {
 
 	// Worker A — PDF operations
-	case "merge", "split", "compress", "rotate", "delete-pages", "reorder":
+	case "merge", "split", "compress", "rotate", "delete-pages", "reorder", "protect", "unlock":
 		return os.Getenv("PDF_QUEUE_URL")
 
 	// Worker B — Image <-> PDF conversions
